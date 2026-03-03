@@ -26,7 +26,7 @@ import type {
 import type { Request as CommonRequest } from "./pb/commonpb/common";
 import { SliverRPCDefinition } from "./pb/rpcpb/services";
 import type { SliverRPCClient } from "./pb/rpcpb/services";
-import { Ls } from "./pb/sliverpb/sliver";
+import { Ls, Execute, Pwd, Rm, Mkdir, Download, Upload, Ps, Ifconfig, Netstat, Terminate, Screenshot } from "./pb/sliverpb/sliver";
 
 const gzip = promisify(gzipCb);
 const gunzip = promisify(gunzipCb);
@@ -303,12 +303,17 @@ export class InteractiveBeacon extends BaseCommands {
     };
   }
 
-  async lsTask(path = ".", timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
-    const lsTask = await super.ls(path, timeoutSeconds);
-    if (lsTask.Response?.Err) {
-      throw new Error(lsTask.Response.Err);
+  /** Generic beacon task queue — call fn, extract TaskID, return { id, wait } */
+  private async queueTask<T>(
+    fn: () => Promise<any>,
+    decode: (data: Uint8Array) => T,
+    timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
+  ) {
+    const raw = await fn();
+    if (raw.Response?.Err) {
+      throw new Error(raw.Response.Err);
     }
-    const taskId = lsTask.Response?.TaskID;
+    const taskId = raw.Response?.TaskID;
     if (!taskId) {
       throw new Error("Missing beacon task id");
     }
@@ -319,14 +324,121 @@ export class InteractiveBeacon extends BaseCommands {
         const taskContent = await this.unary(waitTimeoutSeconds, (signal) =>
           this.rpc.getBeaconTaskContent({ ID: beaconTask.ID }, { signal }),
         );
-        return Ls.decode(taskContent.Response);
+        return decode(taskContent.Response);
       },
     };
   }
 
+  async lsTask(path = ".", timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.ls(path, timeoutSeconds), Ls.decode, timeoutSeconds);
+  }
   async ls(path = ".", timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
-    const task = await this.lsTask(path, timeoutSeconds);
-    return task.wait(timeoutSeconds);
+    const t = await this.lsTask(path, timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async executeTask(exe: string, args: string[] = [], output = true, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.execute(exe, args, output, timeoutSeconds), Execute.decode, timeoutSeconds);
+  }
+  async execute(exe: string, args: string[] = [], output = true, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.executeTask(exe, args, output, timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async pwdTask(timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.pwd(timeoutSeconds), Pwd.decode, timeoutSeconds);
+  }
+  async pwd(timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.pwdTask(timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async cdTask(path: string, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.cd(path, timeoutSeconds), Pwd.decode, timeoutSeconds);
+  }
+  async cd(path: string, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.cdTask(path, timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async rmTask(path: string, recursive = false, force = false, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.rm(path, recursive, force, timeoutSeconds), Rm.decode, timeoutSeconds);
+  }
+  async rm(path: string, recursive = false, force = false, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.rmTask(path, recursive, force, timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async mkdirTask(path: string, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.mkdir(path, timeoutSeconds), Mkdir.decode, timeoutSeconds);
+  }
+  async mkdir(path: string, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.mkdirTask(path, timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async downloadTask(path: string, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.download(path, timeoutSeconds), Download.decode, timeoutSeconds);
+  }
+  async download(path: string, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS): Promise<Buffer> {
+    const t = await this.downloadTask(path, timeoutSeconds);
+    const decoded = await t.wait(timeoutSeconds) as any;
+    const data = decoded.Data ?? decoded.data;
+    if (decoded.Encoder === "gzip") {
+      return gunzip(data) as Promise<Buffer>;
+    }
+    if (decoded.Encoder !== "") {
+      throw new Error(`Unsupported encoder: ${decoded.Encoder}`);
+    }
+    return Buffer.isBuffer(data) ? data : Buffer.from(data);
+  }
+
+  async uploadTask(path: string, data: Buffer, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.upload(path, data, timeoutSeconds), Upload.decode, timeoutSeconds);
+  }
+  async upload(path: string, data: Buffer, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.uploadTask(path, data, timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async psTask(fullInfo = false, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.ps(fullInfo, timeoutSeconds), Ps.decode, timeoutSeconds);
+  }
+  async ps(fullInfo = false, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.psTask(fullInfo, timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async ifconfigTask(timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.ifconfig(timeoutSeconds), Ifconfig.decode, timeoutSeconds);
+  }
+  async ifconfig(timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.ifconfigTask(timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async netstatTask(timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.netstat(timeoutSeconds), Netstat.decode, timeoutSeconds);
+  }
+  async netstat(timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.netstatTask(timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async terminateTask(pid: number, force = false, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.terminate(pid, force, timeoutSeconds), Terminate.decode, timeoutSeconds);
+  }
+  async terminate(pid: number, force = false, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.terminateTask(pid, force, timeoutSeconds);
+    return t.wait(timeoutSeconds);
+  }
+
+  async screenshotTask(timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    return this.queueTask(() => super.screenshot(timeoutSeconds), Screenshot.decode, timeoutSeconds);
+  }
+  async screenshot(timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
+    const t = await this.screenshotTask(timeoutSeconds);
+    return t.wait(timeoutSeconds);
   }
 }
 
