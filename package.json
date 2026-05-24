@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "rm -rf ./lib && tsc -p tsconfig.json",
+    "prepare": "npm run build",
     "build:examples": "npm run build && rm -rf ./e2e/dist && tsc -p tsconfig.examples.json",
     "pb": "./protobuf.sh",
     "docs": "typedoc --out ./docs/ ./src",
