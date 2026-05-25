@@ -52,3 +52,6 @@ e2e/.cache/**/*
 
 # ignore yarn.lock
 yarn.lock
+
+# Build output is committed for npm git installs
+!lib/
